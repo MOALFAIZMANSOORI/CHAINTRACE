@@ -1,0 +1,509 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Crypto Transaction Trail Analyzer</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@400;600;700&display=swap" rel="stylesheet">
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     HEADER
+══════════════════════════════════════════════════════════════════ -->
+<header class="header">
+  <div class="header-inner">
+    <div class="logo">
+      <span class="logo-icon" id="logoIcon">₿</span>
+      <div class="logo-text">
+        <span class="logo-title">CHAIN<span class="accent">TRACE</span></span>
+        <span class="logo-sub">Bitcoin + Ethereum Transaction Trail Analyzer</span>
+      </div>
+    </div>
+    <div class="header-badge" id="headerBadge">Bitcoin Mode</div>
+  </div>
+</header>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     MAIN LAYOUT
+══════════════════════════════════════════════════════════════════ -->
+<main class="layout">
+
+  <!-- ── LEFT PANEL ── -->
+  <aside class="panel panel-left">
+
+    <!-- Input form -->
+    <section class="card">
+      <h2 class="card-title"><span class="dot dot-orange"></span>Query Input</h2>
+
+      <div class="field">
+        <label class="label">Chain</label>
+        <select id="chainSelect" class="input">
+          <option value="bitcoin" selected>Bitcoin (BTC)</option>
+          <option value="ethereum">Ethereum (ETH)</option>
+        </select>
+      </div>
+
+      <div class="field">
+        <label class="label" id="queryLabel">Bitcoin Address or TX Hash</label>
+        <input
+          id="queryInput"
+          class="input"
+          type="text"
+          placeholder="1A1zP1eP5QGefi2DMPTfTL5SLmv7Divf…"
+          autocomplete="off"
+          spellcheck="false"
+        />
+      </div>
+
+      <div class="field">
+        <label class="label">Trace Depth (hops): <strong id="depthLabel">3</strong></label>
+        <input id="depthSlider" class="slider" type="range" min="1" max="5" value="3" />
+        <div class="slider-ticks">
+          <span>1</span><span>2</span><span>3</span><span>4</span><span>5</span>
+        </div>
+      </div>
+
+      <button id="analyzeBtn" class="btn-primary">
+        <span id="btnText">Analyze Trail</span>
+        <span id="btnSpinner" class="spinner hidden"></span>
+      </button>
+
+      <div id="errorBox" class="error-box hidden"></div>
+    </section>
+
+    <!-- Sample test inputs -->
+    <section class="card">
+      <h2 class="card-title"><span class="dot dot-blue"></span>Sample Inputs</h2>
+      <p class="hint" id="sampleHint">Click to auto-fill a known Bitcoin address for testing:</p>
+      <div class="sample-list">
+        <button class="sample-btn" data-chain="bitcoin" data-val="3J98t1WpEZ73CNmQviecrnyiWrnqRhWNLy">
+          Active P2SH Wallet<br/>
+          <span class="mono">3J98t1Wp…</span>
+        </button>
+        <button class="sample-btn" data-chain="bitcoin" data-val="bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh">
+          SegWit Address<br/>
+          <span class="mono">bc1qxy2k…</span>
+        </button>
+        <button class="sample-btn" data-chain="bitcoin" data-val="bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4">
+          Bech32 Address<br/>
+          <span class="mono">bc1qw508…</span>
+        </button>
+        <button class="sample-btn" data-chain="ethereum" data-val="0xde0B295669a9FD93d5F28D9Ec85E40f4cb697BAe">
+          Ethereum Address<br/>
+          <span class="mono">0xde0B295…</span>
+        </button>
+        <button class="sample-btn" data-chain="ethereum" data-val="0x742d35Cc6634C0532925a3b844Bc454e4438f44e">
+          Exchange Wallet<br/>
+          <span class="mono">0x742d35C…</span>
+        </button>
+      </div>
+    </section>
+
+    <!-- Stats panel (filled after analysis) -->
+    <section class="card" id="statsCard" style="display:none">
+      <h2 class="card-title"><span class="dot dot-green"></span>Trace Statistics</h2>
+      <div class="stat-grid" id="statsGrid"></div>
+    </section>
+
+  </aside>
+
+  <!-- ── CENTER PANEL (Graph) ── -->
+  <section class="panel panel-center">
+    <div class="graph-header">
+      <h2 class="card-title">Transaction Graph</h2>
+      <div class="legend">
+        <span class="legend-item"><span class="legend-dot origin"></span>Origin</span>
+        <span class="legend-item"><span class="legend-dot intermediate"></span>Intermediate</span>
+        <span class="legend-item"><span class="legend-dot receiver"></span>End Receiver</span>
+      </div>
+    </div>
+
+    <div id="graphPlaceholder" class="graph-placeholder">
+      <div class="placeholder-icon">⛓</div>
+      <p id="placeholderText">Enter a Bitcoin address or transaction hash above<br/>to visualize the fund flow graph.</p>
+    </div>
+
+    <svg id="graphSvg" class="hidden"></svg>
+
+    <div class="graph-controls hidden" id="graphControls">
+      <button id="zoomIn"  class="ctrl-btn" title="Zoom in">＋</button>
+      <button id="zoomOut" class="ctrl-btn" title="Zoom out">－</button>
+      <button id="zoomFit" class="ctrl-btn" title="Fit to view">⊡</button>
+    </div>
+  </section>
+
+  <!-- ── RIGHT PANEL ── -->
+  <aside class="panel panel-right">
+
+    <!-- End receivers -->
+    <section class="card">
+      <h2 class="card-title"><span class="dot dot-red"></span>Probable End Receivers</h2>
+      <div id="receiversList">
+        <p class="hint">Analysis results will appear here.</p>
+      </div>
+    </section>
+
+    <!-- Suspicious patterns -->
+    <section class="card">
+      <h2 class="card-title"><span class="dot dot-orange"></span>Suspicious Patterns</h2>
+      <div id="patternsList">
+        <p class="hint">Pattern detection results will appear here.</p>
+      </div>
+    </section>
+
+  </aside>
+</main>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     TOOLTIP
+══════════════════════════════════════════════════════════════════ -->
+<div id="tooltip" class="tooltip hidden"></div>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     JAVASCRIPT
+══════════════════════════════════════════════════════════════════ -->
+<script>
+// ──────────────────────────────────────────────────────────────────
+// DOM references
+// ──────────────────────────────────────────────────────────────────
+const queryInput  = document.getElementById("queryInput");
+const chainSelect = document.getElementById("chainSelect");
+const logoIcon    = document.getElementById("logoIcon");
+const headerBadge = document.getElementById("headerBadge");
+const queryLabel  = document.getElementById("queryLabel");
+const sampleHint  = document.getElementById("sampleHint");
+const placeholderText = document.getElementById("placeholderText");
+const depthSlider = document.getElementById("depthSlider");
+const depthLabel  = document.getElementById("depthLabel");
+const analyzeBtn  = document.getElementById("analyzeBtn");
+const btnText     = document.getElementById("btnText");
+const btnSpinner  = document.getElementById("btnSpinner");
+const errorBox    = document.getElementById("errorBox");
+const graphSvg    = document.getElementById("graphSvg");
+const placeholder = document.getElementById("graphPlaceholder");
+const graphCtrls  = document.getElementById("graphControls");
+const statsCard   = document.getElementById("statsCard");
+const statsGrid   = document.getElementById("statsGrid");
+const receiversList = document.getElementById("receiversList");
+const patternsList  = document.getElementById("patternsList");
+const tooltip       = document.getElementById("tooltip");
+
+const chainUiMap = {
+  bitcoin: {
+    queryLabel: "Bitcoin Address or TX Hash",
+    placeholder: "1A1zP1eP5QGefi2DMPTfTL5SLmv7Divf…",
+    sampleHint: "Click to auto-fill a known Bitcoin address for testing:",
+    graphHint: "Enter a Bitcoin address or transaction hash above<br/>to visualize the fund flow graph.",
+    badge: "Bitcoin Mode",
+    logo: "₿",
+  },
+  ethereum: {
+    queryLabel: "Ethereum Address or TX Hash",
+    placeholder: "0xde0B295669a9FD93d5F28D9Ec85E40f4cb697BAe",
+    sampleHint: "Click to auto-fill a known Ethereum address for testing:",
+    graphHint: "Enter an Ethereum address or transaction hash above<br/>to visualize the fund flow graph.",
+    badge: "Ethereum Mode",
+    logo: "Ξ",
+  },
+};
+
+function refreshChainUI() {
+  const chain = chainSelect.value;
+  const cfg = chainUiMap[chain] || chainUiMap.bitcoin;
+
+  queryLabel.textContent = cfg.queryLabel;
+  queryInput.placeholder = cfg.placeholder;
+  sampleHint.textContent = cfg.sampleHint;
+  placeholderText.innerHTML = cfg.graphHint;
+  headerBadge.textContent = cfg.badge;
+  logoIcon.textContent = cfg.logo;
+
+  document.body.classList.remove("chain-bitcoin", "chain-ethereum");
+  document.body.classList.add(chain === "ethereum" ? "chain-ethereum" : "chain-bitcoin");
+
+  document.querySelectorAll(".sample-btn").forEach(btn => {
+    const visible = btn.dataset.chain === chain;
+    btn.style.display = visible ? "block" : "none";
+  });
+}
+
+// ──────────────────────────────────────────────────────────────────
+// Depth slider
+// ──────────────────────────────────────────────────────────────────
+depthSlider.addEventListener("input", () => {
+  depthLabel.textContent = depthSlider.value;
+});
+
+// ──────────────────────────────────────────────────────────────────
+// Sample button auto-fill
+// ──────────────────────────────────────────────────────────────────
+document.querySelectorAll(".sample-btn").forEach(btn => {
+  btn.addEventListener("click", () => {
+    if (btn.dataset.chain) chainSelect.value = btn.dataset.chain;
+    refreshChainUI();
+    queryInput.value = btn.dataset.val;
+    queryInput.focus();
+  });
+});
+
+chainSelect.addEventListener("change", refreshChainUI);
+refreshChainUI();
+
+// ──────────────────────────────────────────────────────────────────
+// Analyze button → POST /analyze
+// ──────────────────────────────────────────────────────────────────
+analyzeBtn.addEventListener("click", runAnalysis);
+queryInput.addEventListener("keydown", e => { if (e.key === "Enter") runAnalysis(); });
+
+async function runAnalysis() {
+  const query = queryInput.value.trim();
+  const chain = chainSelect.value;
+  const chainName = chain === "ethereum" ? "Ethereum" : "Bitcoin";
+  if (!query) { showError(`Please enter a ${chainName} address or transaction hash.`); return; }
+
+  setLoading(true);
+  hideError();
+
+  try {
+    const res = await fetch("/analyze", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ query, depth: parseInt(depthSlider.value), chain }),
+    });
+    const data = await res.json();
+
+    if (!res.ok || data.error) {
+      showError(data.error || "Unknown error from server.");
+      return;
+    }
+
+    renderGraph(data.graph, query, data.input_type, data.asset_symbol || "BTC");
+    renderStats(data);
+    renderReceivers(data.end_receivers, data.asset_symbol || "BTC");
+    renderPatterns(data.patterns);
+
+  } catch (err) {
+    showError("Network error: " + err.message);
+  } finally {
+    setLoading(false);
+  }
+}
+
+// ──────────────────────────────────────────────────────────────────
+// D3.js Force-directed graph
+// ──────────────────────────────────────────────────────────────────
+let zoomBehavior;
+
+function renderGraph(graphData, originQuery, inputType, assetSymbol) {
+  if (!graphData.nodes.length) {
+    showError("No graph data returned. The address may have no transactions.");
+    return;
+  }
+
+  placeholder.classList.add("hidden");
+  graphSvg.classList.remove("hidden");
+  graphCtrls.classList.remove("hidden");
+
+  const width  = graphSvg.parentElement.clientWidth  || 700;
+  const height = graphSvg.parentElement.clientHeight || 500;
+
+  // Clear previous render
+  d3.select(graphSvg).selectAll("*").remove();
+  graphSvg.setAttribute("width",  width);
+  graphSvg.setAttribute("height", height);
+
+  const svg = d3.select(graphSvg);
+  const accentColor = getComputedStyle(document.body).getPropertyValue("--accent").trim() || "#f7931a";
+
+  // ── Zoom ──
+  const container = svg.append("g").attr("class", "zoom-container");
+  zoomBehavior = d3.zoom()
+    .scaleExtent([0.2, 4])
+    .on("zoom", e => container.attr("transform", e.transform));
+  svg.call(zoomBehavior);
+
+  // ── Arrow marker ──
+  svg.append("defs").append("marker")
+    .attr("id", "arrow")
+    .attr("viewBox", "0 -4 10 8")
+    .attr("refX", 18).attr("refY", 0)
+    .attr("markerWidth", 6).attr("markerHeight", 6)
+    .attr("orient", "auto")
+    .append("path")
+    .attr("d", "M0,-4L10,0L0,4")
+    .attr("fill", accentColor);
+
+  // ── Force simulation ──
+  const simulation = d3.forceSimulation(graphData.nodes)
+    .force("link",   d3.forceLink(graphData.edges).id(d => d.id).distance(130))
+    .force("charge", d3.forceManyBody().strength(-350))
+    .force("center", d3.forceCenter(width / 2, height / 2))
+    .force("collision", d3.forceCollide(28));
+
+  // ── Edges ──
+  const link = container.append("g").selectAll("line")
+    .data(graphData.edges)
+    .join("line")
+    .attr("class", "graph-edge")
+    .attr("stroke-width", d => Math.max(1, Math.min(d.value * 8, 5)))
+    .attr("marker-end", "url(#arrow)");
+
+  // ── Edge labels ──
+  const edgeLabel = container.append("g").selectAll("text")
+    .data(graphData.edges)
+    .join("text")
+    .attr("class", "edge-label")
+    .text(d => d.value > 0 ? d.value.toFixed(4) + " " + assetSymbol : "");
+
+  // ── Nodes ──
+  const node = container.append("g").selectAll("g")
+    .data(graphData.nodes)
+    .join("g")
+    .attr("class", d => `graph-node node-${d.node_type}`)
+    .call(drag(simulation));
+
+  node.append("circle")
+    .attr("r", d => {
+      if (d.node_type === "origin")   return 18;
+      if (d.node_type === "receiver") return 15;
+      return 11;
+    });
+
+  node.append("text")
+    .attr("class", "node-label")
+    .attr("dy", 28)
+    .text(d => d.id.slice(0, 8) + "…");
+
+  // ── Tooltip on hover ──
+  node
+    .on("mouseover", (event, d) => {
+      tooltip.innerHTML = `
+        <strong>${d.node_type.toUpperCase()}</strong><br/>
+        <span class="mono">${d.id}</span><br/>
+        ↓ Received: ${d.total_received} ${assetSymbol}<br/>
+        ↑ Sent: ${d.total_sent} ${assetSymbol}<br/>
+        In: ${d.in_degree} | Out: ${d.out_degree}
+      `;
+      tooltip.classList.remove("hidden");
+    })
+    .on("mousemove", event => {
+      tooltip.style.left = (event.pageX + 14) + "px";
+      tooltip.style.top  = (event.pageY - 10) + "px";
+    })
+    .on("mouseout", () => tooltip.classList.add("hidden"));
+
+  // ── Tick update ──
+  simulation.on("tick", () => {
+    link
+      .attr("x1", d => d.source.x).attr("y1", d => d.source.y)
+      .attr("x2", d => d.target.x).attr("y2", d => d.target.y);
+
+    edgeLabel
+      .attr("x", d => (d.source.x + d.target.x) / 2)
+      .attr("y", d => (d.source.y + d.target.y) / 2);
+
+    node.attr("transform", d => `translate(${d.x},${d.y})`);
+  });
+
+  // ── Zoom controls ──
+  document.getElementById("zoomIn") .onclick = () => svg.transition().call(zoomBehavior.scaleBy, 1.4);
+  document.getElementById("zoomOut").onclick = () => svg.transition().call(zoomBehavior.scaleBy, 0.7);
+  document.getElementById("zoomFit").onclick = () => svg.transition().call(zoomBehavior.transform, d3.zoomIdentity);
+}
+
+// Drag helper
+function drag(simulation) {
+  return d3.drag()
+    .on("start", (e, d) => { if (!e.active) simulation.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y; })
+    .on("drag",  (e, d) => { d.fx = e.x; d.fy = e.y; })
+    .on("end",   (e, d) => { if (!e.active) simulation.alphaTarget(0); d.fx = null; d.fy = null; });
+}
+
+// ──────────────────────────────────────────────────────────────────
+// Render stats
+// ──────────────────────────────────────────────────────────────────
+function renderStats(data) {
+  statsCard.style.display = "block";
+  const stats = [
+    { label: "Chain", value: data.chain === "ethereum" ? "Ethereum" : "Bitcoin" },
+    { label: "Nodes", value: data.total_nodes },
+    { label: "Edges", value: data.total_edges },
+    { label: "Hops",  value: data.hops_traced },
+    { label: "Type",  value: data.input_type === "address" ? "Address" : "TX Hash" },
+  ];
+  statsGrid.innerHTML = stats.map(s =>
+    `<div class="stat-item"><span class="stat-val">${s.value}</span><span class="stat-label">${s.label}</span></div>`
+  ).join("");
+}
+
+// ──────────────────────────────────────────────────────────────────
+// Render end receivers
+// ──────────────────────────────────────────────────────────────────
+function renderReceivers(receivers, assetSymbol) {
+  if (!receivers || receivers.length === 0) {
+    receiversList.innerHTML = `<p class="hint">No probable end receivers identified.</p>`;
+    return;
+  }
+  receiversList.innerHTML = receivers.slice(0, 6).map((r, i) => `
+    <div class="receiver-card ${i === 0 ? 'top-receiver' : ''}">
+      <div class="receiver-header">
+        <span class="confidence-badge">${r.confidence}% confidence</span>
+        ${i === 0 ? '<span class="top-badge">Most Likely</span>' : ''}
+      </div>
+      <div class="mono addr-text">${r.address}</div>
+      <div class="receiver-stats">
+        <span>↓ ${r.total_received} ${assetSymbol}</span>
+        <span>↑ ${r.total_sent} ${assetSymbol}</span>
+        <span class="${r.net > 0 ? 'net-positive' : 'net-zero'}">Net ${r.net} ${assetSymbol}</span>
+      </div>
+      <div class="reason-text">${r.reason}</div>
+    </div>
+  `).join("");
+}
+
+// ──────────────────────────────────────────────────────────────────
+// Render suspicious patterns
+// ──────────────────────────────────────────────────────────────────
+function renderPatterns(patterns) {
+  if (!patterns || patterns.length === 0) {
+    patternsList.innerHTML = `<p class="hint all-clear">✓ No suspicious patterns detected.</p>`;
+    return;
+  }
+  patternsList.innerHTML = patterns.map(p => `
+    <div class="pattern-card severity-${p.severity.toLowerCase()}">
+      <div class="pattern-header">
+        <span class="pattern-name">${p.pattern}</span>
+        <span class="severity-badge sev-${p.severity.toLowerCase()}">${p.severity}</span>
+      </div>
+      <p class="pattern-desc">${p.description}</p>
+      <div class="evidence-list">
+        ${p.evidence.map(e => `<code class="evidence-item">${e}</code>`).join("")}
+      </div>
+    </div>
+  `).join("");
+}
+
+// ──────────────────────────────────────────────────────────────────
+// UI helpers
+// ──────────────────────────────────────────────────────────────────
+function setLoading(on) {
+  analyzeBtn.disabled = on;
+  btnText.textContent  = on ? "Tracing…" : "Analyze Trail";
+  btnSpinner.classList.toggle("hidden", !on);
+}
+
+function showError(msg) {
+  errorBox.textContent = msg;
+  errorBox.classList.remove("hidden");
+}
+
+function hideError() {
+  errorBox.classList.add("hidden");
+}
+</script>
+</body>
+</html>
